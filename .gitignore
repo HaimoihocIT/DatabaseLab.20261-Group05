@@ -1,0 +1,39 @@
+# Dependencies and optional portable tools
+node_modules/
+.tools/
+.npm-cache/
+
+# Secrets: only sanitized examples may be tracked
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+.aws/
+
+# Supabase machine state, remote link and credentials
+supabase/.temp/
+supabase/.branches/
+.supabase/
+supabase/signing_keys.json
+
+# Local database storage / exports must never enter Git
+.docker/
+volumes/
+docker-data/
+backups/
+*.dump
+*.backup
+
+# Editor and OS state (connection profiles can contain passwords)
+.vscode/
+.idea/
+*.log
+Thumbs.db
+Desktop.ini
+.DS_Store

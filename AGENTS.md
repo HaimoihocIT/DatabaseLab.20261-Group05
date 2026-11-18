@@ -1,6 +1,6 @@
-# Thiết lập Supabase DMS trên máy Windows của developer
+# Thiết lập và làm việc với Supabase DMS trên Windows
 
-Dành cho agent được giao dựng môi trường local của Group 05. Kết quả cần bàn giao là một checkout riêng, một database PostgreSQL local chạy bằng Docker Desktop và bằng chứng `npm.cmd run db:verify` đạt trên đúng máy đó. Đọc [README.md](README.md) để tra cứu cài đặt, migrations và quy trình Git của nhóm.
+Dành cho agent hỗ trợ developer Group 05. Mục 1–6 hướng dẫn dựng một checkout và PostgreSQL local riêng, rồi xác nhận `npm.cmd run db:verify` đạt trên đúng máy đó. Mục 7 hướng dẫn tạo migration, áp dụng file SQL, kiểm thử, mở PR và đồng bộ sau merge. Xem [README.md](README.md) để tra cứu thêm.
 
 ## 1. Nhận đúng repository
 
@@ -128,4 +128,78 @@ Wrapper kiểm tra đúng container, context Docker và cổng local trước kh
 
 Báo trong chat phiên bản Windows, Git, Node/npm, Docker, Supabase CLI và PostgreSQL. Ghi `PASS`, `FAIL` hoặc `SKIP` cho từng mục startup, migrations, schema/seed/RLS, HTTP services và reset. Kèm dòng kết quả đã rút gọn, URL local và cách xử lý blocker. Chỉ đánh dấu `PASS` cho kiểm thử đã chạy trên máy này. Không đưa password, token, API keys, `.env`, Docker volumes hoặc link metadata vào commit hay báo cáo.
 
-Sau khi onboarding, developer làm việc trên feature branch, kiểm thử local và mở PR theo [quy trình Git trong README](README.md#8-quy-trình-git-cho-3-developers). Việc push, thay quyền truy cập và deploy staging cần phê duyệt riêng của chủ dự án. Tuyệt đối không reset Cloud.
+## 7. Quy trình làm việc với file SQL
+
+Mỗi developer làm trên nhánh riêng và database local riêng. Kiểm tra ERD/spec đã duyệt và phạm vi được giao trước khi thay đổi schema. SQL cần phiên bản hóa để đổi schema hoặc dữ liệu dùng chung nằm trong `supabase/migrations/`. Dữ liệu giả phục vụ test local nằm trong `supabase/seed.sql`. Truy vấn `SELECT` dùng để kiểm tra kết quả có thể chạy trực tiếp trên local.
+
+### Tạo nhánh và migration
+
+Sau khi PR setup đã merge vào `main`, chạy từng lệnh từ thư mục repo. Nếu checkout có thay đổi, xử lý phần việc đang làm trước khi chuyển nhánh. Dừng nếu lệnh trước đó thất bại.
+
+```powershell
+git status --short --branch
+git switch main
+git pull --ff-only origin main
+git switch -c feature/db-approved-change
+# Chạy npm.cmd ci nếu package-lock.json thay đổi.
+npm.cmd run db:start
+npm.cmd run db:migrate
+npm.cmd run db:verify
+npx.cmd --no-install supabase migration new approved_change
+```
+
+Thay tên nhánh và `approved_change` bằng mô tả công việc thật. Mở file mới mà CLI in ra dưới `supabase/migrations/`, viết SQL rồi lưu UTF-8. Giữ timestamp `YYYYMMDDHHMMSS` do CLI sinh. Đặt thay đổi có phụ thuộc sau migration tạo đối tượng mà nó tham chiếu. Bảng cần truy cập qua API phải có quyền và RLS policies phù hợp với spec.
+
+### Sau khi viết xong SQL
+
+1. Đọc lại file vừa sửa và kiểm tra thao tác ảnh hưởng dữ liệu hiện có. Với `DROP`, `TRUNCATE`, đổi kiểu có thể làm mất dữ liệu hoặc cập nhật hàng loạt, dừng trước khi áp dụng và xác nhận phạm vi với chủ dự án.
+2. Áp dụng file bằng Supabase CLI trên local. Chạy từng lệnh bên dưới và kiểm tra lịch sử có timestamp mới ở phía database. Nếu migration thay đổi schema khác `public` hoặc `setup_meta`, bổ sung schema đó vào danh sách lint.
+
+   ```powershell
+   npm.cmd run db:migrate
+   npx.cmd --no-install supabase migration list
+   npx.cmd --no-install supabase db lint --schema public,setup_meta --fail-on error
+   npm.cmd run db:verify
+   ```
+
+3. Kiểm tra kết quả của SQL mới bằng truy vấn trên Studio local hoặc `supabase db query --read-only`. Ví dụ, đối chiếu cột, khóa và constraint với spec. Với thay đổi quyền, thử một trường hợp được phép và một trường hợp bị từ chối bằng role của ứng dụng. `db:verify` kiểm tra hạ tầng và lịch sử migrations. Kiểm thử theo spec xác nhận phần nghiệp vụ.
+4. Chứng minh cả chuỗi migrations chạy được từ đầu bằng mục 4 trên database local mới đã xác minh. Sau reset, thử lại các kiểm thử liên quan đến SQL mới và seed. Nếu local đang có dữ liệu cần giữ, ghi **SKIP** cho reset và nêu lý do trong PR. `db:migrate` giữ dữ liệu và áp dụng các timestamp còn thiếu. Seed được nạp khi dựng database mới hoặc reset.
+
+Chạy migration qua CLI để lịch sử được ghi đúng. Không dán nguyên file migration vào SQL Editor rồi chạy `db:migrate` tiếp. Nếu `db:migrate` lỗi, đọc lỗi SQL đầu tiên và đối chiếu migration history với các file trước khi thử lại. Nếu bạn sửa file sau khi nó đã chạy local, CLI nhận ra timestamp cũ và sẽ không chạy lại file đó. Với file chưa chia sẻ, kiểm thử bản sửa trên database local mới theo mục 4. Với file đã merge hoặc đã chạy trên staging, giữ nguyên file cũ và tạo migration mới để sửa.
+
+### Commit, review và merge
+
+Kiểm tra staging area trước khi dùng ví dụ này. Nếu có file đã stage của việc khác, giữ nguyên và xử lý riêng. Chỉ chọn đúng file migration do mình tạo và `supabase/seed.sql` nếu có thay đổi seed thuộc cùng việc.
+
+```powershell
+git status --short
+git diff --cached --name-only
+$migrationFile = Read-Host 'Tên file migration .sql vừa tạo, gồm timestamp'
+if ($migrationFile -notmatch '^\d{14}_[a-z0-9_]+\.sql$') { throw 'Tên migration không hợp lệ' }
+git add -- "supabase/migrations/$migrationFile"
+# Nếu việc này có sửa seed, chạy: git add -- supabase/seed.sql
+git diff --cached --check
+git diff --cached
+git commit -m 'feat(db): add approved migration'
+# Chỉ push sau khi được phép.
+git push -u origin HEAD
+```
+
+Mở PR từ feature branch vào `main`. Ghi rõ mục đích SQL, file phụ thuộc, tác động lên dữ liệu hoặc quyền, kết quả migrate/verify/kiểm thử nghiệp vụ và kết quả reset local nếu đã chạy. Một thành viên khác review SQL và thứ tự migrations trước khi người có quyền merge.
+
+Nếu `main` có migration mới trong lúc làm việc, cập nhật feature branch sạch bằng `git fetch origin` rồi `git merge origin/main`. Kiểm tra cả xung đột Git lẫn hai file cùng đổi một đối tượng SQL. Nếu trùng timestamp, dùng CLI tạo timestamp mới cho migration của mình khi file chưa chia sẻ. Sau khi xử lý, chạy lại các kiểm thử local. Nếu database history và file trên nhánh lệch nhau, dùng [cách xử lý conflicts trong README](README.md#9-xử-lý-conflicts-khi-nhiều-người-cùng-tạo-migration). Không tự sửa lịch sử migrations hoặc dùng `--include-all` để ép chạy.
+
+### Đồng bộ sau merge và đưa lên staging
+
+Các thành viên chuyển về `main` khi checkout sạch, pull code và áp dụng migration mới trên database riêng.
+
+```powershell
+git switch main
+git pull --ff-only origin main
+# Chạy npm.cmd ci nếu package-lock.json thay đổi.
+npm.cmd run db:start
+npm.cmd run db:migrate
+npm.cmd run db:verify
+```
+
+Maintainer triển khai staging từ `main` đã review. Đối chiếu project ref và danh sách migrations bằng dry-run, lấy phê duyệt cho đợt deploy, rồi kiểm tra lại history sau khi áp dụng. Việc push GitHub và thay quyền truy cập cũng cần được phép. Tuyệt đối không reset Cloud. Xem [quy trình Cloud staging trong README](README.md#10-cloud-staging--chỉ-thực-hiện-sau-quyền-và-phê-duyệt).
